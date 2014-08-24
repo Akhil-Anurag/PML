@@ -1,0 +1,169 @@
+## **Human Activity Recognition - Predicting the manner of doing exercise**
+
+## **Executive Summary**
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+The goal of this project is to predict the manner in which they did the exercise.
+
+## **Setting the Working directory and environment**
+
+```{r,warning=FALSE}
+setwd("E:\\R\\Prep\\Practical Machine Learning\\Assignment")
+
+library(tree)
+library(caret)
+library(randomForest)
+```
+
+
+## **Data Reading**
+
+The training and testing datasets used in the analysis may be found as follows:
+
+Training dataset:  
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)
+
+Testing dataset:  
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)
+
+```{r }
+train=read.csv(file="pml-training.csv",header=TRUE,sep=",",row.names=NULL,               colClasses=c("numeric","character",rep("numeric",2),rep("character",2),rep("numeric",153),"character"), na.strings=c("#DIV/0!","NA") )
+```
+
+## **Data Exploration**
+
+**Checking and Dropping variables with more than 20% missing values**
+
+```{r }
+df=data.frame( Missing_perc=colSums(is.na(train))*100/nrow(train))
+length(row.names(df[df$Missing_perc<=20,,drop=FALSE]))
+
+df1=train[,names(train) %in% row.names(df[df$Missing_perc<=20,,drop=FALSE])]
+
+```
+
+**Are there any missing Values in the data? If not, create a data frame after dropping X, user_name, raw_timestamp_part_1, raw_timestamp_part_2 and cvtd_timestamp**
+
+
+```{r }
+sum(complete.cases(df1))
+final_df=data.frame(new_window=as.factor(df1$new_window),df1[,7:59],class=as.factor(df1$classe))
+dim(final_df)
+plot(final_df$class,col=2:6,main = "class frequency plot")
+```
+
+## **Data Pre-Processing**
+
+**Checking for near zero variance:**
+
+
+```{r }
+zero_var=nearZeroVar(x=final_df[,2:54],saveMetrics=TRUE)
+final_df=final_df[,zero_var[,'nzv']==FALSE]
+dim(final_df)
+```
+
+**None of the variable have near zero variance**
+
+**Checking for Highly-Corelated variables (More than .9) and removing the from data frame**
+
+```{r }
+cor_check=findCorrelation(cor(final_df[,2:54]),.9)
+final_df=final_df[,-cor_check]
+```
+
+
+## **Model Building**
+
+**Data Partioning: Train and Validation Set**
+
+```{r }
+set.seed(123)
+inTrain=createDataPartition(final_df$class,p=.6,list=FALSE)  
+train=final_df[inTrain,]
+test=final_df[-inTrain,]
+dim(train);dim(test)
+```
+
+**Creating Classification Tree**
+
+```{r }
+train.tree=tree(class~. ,train)
+summary(train.tree)
+```
+
+
+**Cross-Validation and Pruning the Tree**
+
+```{r }
+train.cv=cv.tree(train.tree,FUN=prune.misclass)
+par(mfrow=c(1,2))
+plot(train.cv$size,train.cv$dev,type="b",main="Tree size  VS. Deviance")
+plot(train.cv$size,train.cv$k,type="b",main="Tree size  VS. Tuning Parameter")
+train.prune=prune.misclass(train.tree,best=16)
+```
+
+**Prediction on Test set and Calculating Misclassification Error**
+
+```{r }
+test.tree=predict(train.prune,test,type="class")
+matrix=table(test.tree,test$class)
+print(1- (sum(diag(matrix))/sum(matrix)))
+par(mfrow=c(1,1))
+plot(train.prune)
+text(train.prune,pretty=0,cex=0.8)
+```
+
+**Misclassification Error is quite high even on test data, We will now try to use Random Forest to build the Tree**
+
+## **Applying Random Forest**
+
+```{r }
+bag.train=randomForest(class~.,data=train,mtry=30,ntree=100)
+bag.train
+```
+
+**Prediction on Test data and calculation misclassification error**
+```{r }
+bag.test=predict(bag.train,test)
+matrix=table(bag.test,test$class)
+print(1- (sum(diag(matrix))/sum(matrix)))
+head(varImp(bag.train),n=10)
+```
+
+**Random Forest is able to classify quite well**
+
+## **Applying Random Forest result on hold out sample**
+
+
+```{r }
+test=read.csv(file="pml-testing.csv",header=TRUE,sep=",")
+test1=test[,names(test) %in% names(final_df)]
+for (i in 2:47) { test1[,i]=as.numeric(test1[,i])}
+test1$new_window=factor(test1$new_window,levels=c(levels(test1$new_window),"yes"))
+
+answers=predict(object=bag.train,test1)
+answers
+```
+
+## **Writing answers to a file**
+
+
+```{r }
+pml_write_files = function(x) {
+    n = length(x)
+    for (i in 1:n) {
+        filename = paste0("problem_id_", i, ".txt")
+        write.table(x[i], file = filename, quote = FALSE, row.names = FALSE, 
+            col.names = FALSE)
+    }
+}
+
+pml_write_files(answers)
+```
+
+## **Conclusion**
+1. Decision Tree provided better interpretebility but it is not accurate.  
+2. Random Forest is finally used as machine language algorithm. It provided an almost perfect classifier on the test data.
+
